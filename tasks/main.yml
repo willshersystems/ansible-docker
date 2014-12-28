@@ -1,0 +1,84 @@
+---
+- name: Check OS
+  assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version | version_compare('14.04', '>=')
+    
+- name: Kernel packages
+  apt:
+    name: "{{ item }}"
+  register: docker_kernel_change
+  with_items:
+    - cgroup-lite
+    - apparmor
+  
+- name: APT HTTPS transport
+  apt:
+    name: apt-transport-https
+
+- name: Docker APT key
+  apt_key:
+    keyserver: keyserver.ubuntu.com
+    id: 36A1D7869245C8950F966E92D8576A8BA88D21E9
+
+- name: Docker APT repository
+  apt_repository:
+    repo: deb https://get.docker.com/ubuntu docker main
+
+- name: Install docker
+  apt:
+    name: lxc-docker
+
+- name: Add users to docker group
+  user:
+    name: "{{ item }}"
+    groups: docker
+    append: yes
+  with_items: docker_users
+  when: docker_users is defined
+  
+- name: Enable memory and swap accounting
+  lineinfile:
+    dest: /etc/default/grub
+    regexp: GRUB_CMDLINE_LINE=
+    line: GRUB_CMDLINE_LINE="cgroup_enable=memory swapaccount=1"
+  register: docker_grub_change
+  when: docker_enable_memory_accounting == true
+
+- name: Update grub
+  command: update-grub
+  register: docker_kernel_change
+  when: docker_grub_change|changed
+
+- name: Reboot server to apply kernel changes
+  command: /sbin/shutdown -r now
+  register: docker_reboot_result
+  when: docker_kernel_change|changed
+
+- name: Wait for instance to come online (10 minute timeout)
+  local_action:
+    module: wait_for
+    host: "{{ ansible_ssh_host|default(inventory_hostname) }}"
+    port: "{{ ansible_ssh_port|default(docker_ssh_port) }}"
+    delay: 10
+    timeout: 600
+    state: started
+  sudo: false
+  when: docker_reboot_result|changed
+
+- name: Set UFW to ACCEPT forwarded packets
+  lineinfile:
+    dest: /etc/default/ufw
+    regexp: DEFAULT_FORWARD_POLICY=
+    line: DEFAULT_FORWARD_POLICY="ACCEPT"
+  notify: reload_ufw
+ 
+- name: ACCEPT remote docker requests
+  ufw:
+    rule: allow
+    src: "{{ item }}"
+    port: 2375
+    proto: tcp
+  with_items: docker_remote_clients
+  when: docker_remote_clients is defined
