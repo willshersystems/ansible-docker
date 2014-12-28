@@ -29,6 +29,11 @@ cause the server to be rebooted to affect kernel parameter changes.
 Port used to test server for server reboot completing. Defaults to *22*, but
 really uses *ansible_ssh_port* and will only use this value if that isn't set.
 
+* docker_remote_clients
+
+List of remote IP addresses to allow access via UFW to the server. Defaults to
+*undefined*. Note that ufw is not started or enabled by this module.
+
 Dependencies
 ------------
 
